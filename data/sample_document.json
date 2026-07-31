@@ -1,0 +1,26 @@
+{
+  "doc_id": "d_sample_0001",
+  "filename": "vendor_agreement_sample.pdf",
+  "source_language": "en",
+  "page_count": 2,
+  "clauses": [
+    {
+      "clause_id": "c_001",
+      "index": 0,
+      "heading": "Indemnification",
+      "text_original": "The Vendor shall indemnify, defend and hold harmless the Client from and against any and all claims, damages and expenses, without limitation.",
+      "text_en": "The Vendor shall indemnify, defend and hold harmless the Client from and against any and all claims, damages and expenses, without limitation.",
+      "page": 1,
+      "char_span": [1420, 1620]
+    },
+    {
+      "clause_id": "c_002",
+      "index": 1,
+      "heading": "Term and Termination",
+      "text_original": "This Agreement shall commence on the Effective Date and continue for twelve (12) months, renewing automatically unless either party gives thirty (30) days notice.",
+      "text_en": "This Agreement shall commence on the Effective Date and continue for twelve (12) months, renewing automatically unless either party gives thirty (30) days notice.",
+      "page": 1,
+      "char_span": [1980, 2170]
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+pydantic>=2
+streamlit>=1.30
+pdfplumber
+python-docx
+langdetect
+requests
