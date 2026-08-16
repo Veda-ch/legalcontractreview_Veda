@@ -1,3 +1,11 @@
 __pycache__/
 *.pyc
 data/uploads/
+# Generated knowledge base / retrieval artifacts
+data/knowledge_base/
+legalbert_finetuned/
+training_output/
+*.zip
+# Temporary/generated files
+*.tmp
+*.log
