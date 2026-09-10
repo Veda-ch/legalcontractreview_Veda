@@ -92,6 +92,7 @@ class ClauseFinding(BaseModel):
     text_comparison: dict[str, Any] = Field(default_factory=dict)
     evidence: dict[str, Any] = Field(default_factory=dict)
     explanation: str
+    adversarial_review: Optional[dict[str, Any]] = None
 
 
 class ReviewReport(BaseModel):
@@ -102,6 +103,68 @@ class ReviewReport(BaseModel):
     clause_findings: list[ClauseFinding]
     flagged_for_review: list[str]
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---- Version Workflow (Phase 2): database storage + version comparison ----
+
+VersionChangeType = Literal["added", "removed", "modified", "unchanged"]
+RiskChangeType = Literal["increased", "reduced", "unchanged"]
+
+
+class ClauseDiffEntry(BaseModel):
+    change_type: VersionChangeType
+    old_clause_id: Optional[str] = None
+    new_clause_id: Optional[str] = None
+    similarity: float = Field(ge=0.0, le=1.0)
+    old_heading: Optional[str] = None
+    new_heading: Optional[str] = None
+    old_text_snippet: Optional[str] = None
+    new_text_snippet: Optional[str] = None
+
+
+class VersionDiff(BaseModel):
+    old_doc_id: str
+    new_doc_id: str
+    entries: list[ClauseDiffEntry]
+    old_clause_count: int
+    new_clause_count: int
+
+
+class ClauseRiskComparison(BaseModel):
+    change_type: VersionChangeType
+    risk_change: RiskChangeType
+    old_clause_id: Optional[str] = None
+    new_clause_id: Optional[str] = None
+    old_risk_assessment: Optional[RiskAssessment] = None
+    new_risk_assessment: Optional[RiskAssessment] = None
+    old_review_decision: Optional[ReviewAction] = None
+    new_review_decision: Optional[ReviewAction] = None
+    explanation: str
+
+
+class RiskComparisonReport(BaseModel):
+    old_doc_id: str
+    new_doc_id: str
+    clause_comparisons: list[ClauseRiskComparison]
+    increased_count: int
+    reduced_count: int
+    unchanged_count: int
+
+
+class VersionRecommendation(BaseModel):
+    old_doc_id: str
+    new_doc_id: str
+    safer_version: Literal["old", "new", "equivalent"]
+    reasoning: str
+    reasoning_source: Literal["llm", "fallback"]
+
+
+class VersionAnalysisResult(BaseModel):
+    matched_doc_id: Optional[str] = None
+    match_score: Optional[float] = None
+    diff: Optional[VersionDiff] = None
+    comparison: Optional[RiskComparisonReport] = None
+    recommendation: Optional[VersionRecommendation] = None
 
 
 # """Frozen data contracts for the legal contract review pipeline.

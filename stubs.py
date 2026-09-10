@@ -21,53 +21,14 @@ from parsing import parse_document
 from classifier import classify_clause
 from legal_kb import retrieve
 from risk_analysis import analyze_clause as _analyze_clause
+from uncertainty_bandit import uncertainty_agent as _uncertainty_agent
 
 
 def uncertainty_agent(features: dict) -> UncertaintyDecision:
-    """Operational review policy; this is not a legal-risk score."""
-    clause_id = features["clause_id"]
-    confidence = float(features.get("confidence", 0.0))
-    relevance = float(features.get("relevance", 0.0))
-    assessment = features.get("risk_assessment", "insufficient_evidence")
-
-    if confidence < 0.60:
-        return UncertaintyDecision(
-            clause_id=clause_id,
-            action="reanalyze",
-            policy_confidence=0.88,
-            reason="Classification confidence is below the configured uncertainty threshold; the clause should be reanalyzed.",
-        )
-
-    if relevance < 0.45:
-        return UncertaintyDecision(
-            clause_id=clause_id,
-            action="reanalyze",
-            policy_confidence=0.82,
-            reason="Retrieved legal evidence is weak; additional analysis or broader contract context is recommended.",
-        )
-
-    if assessment == "attention_required":
-        return UncertaintyDecision(
-            clause_id=clause_id,
-            action="flag",
-            policy_confidence=0.90,
-            reason="A configured source-backed risk factor was matched directly in the clause text; human legal review is recommended.",
-        )
-
-    if assessment == "insufficient_evidence":
-        return UncertaintyDecision(
-            clause_id=clause_id,
-            action="reanalyze",
-            policy_confidence=0.80,
-            reason="The available evidence is insufficient to support a confident qualitative assessment.",
-        )
-
-    return UncertaintyDecision(
-        clause_id=clause_id,
-        action="accept",
-        policy_confidence=0.85,
-        reason="No configured source-backed risk factor was detected and classification/retrieval evidence is adequate.",
-    )
+    """Stage 5 — RL-based Uncertainty Verification Agent (contextual bandit).
+    See uncertainty_bandit.py for the policy itself; this delegates so any
+    remaining direct `stubs.uncertainty_agent` callers keep working."""
+    return _uncertainty_agent(features)
 
 
 def analyze_clause(clause: Clause, cls: Classification, retr: RetrievalResult) -> dict:

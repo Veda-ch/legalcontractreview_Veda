@@ -4,8 +4,13 @@ from __future__ import annotations
 import json
 import sys
 
-from interfaces import ClauseFinding, ReviewReport, Document
+from interfaces import ClauseFinding, ReviewReport, Document, VersionAnalysisResult
 import stubs
+import supervisor
+import storage
+import version_diff
+import risk_comparison
+import version_recommendation
 
 
 def run(file_path: str = "data/sample_document.json") -> tuple[Document, ReviewReport]:
@@ -16,39 +21,59 @@ def run(file_path: str = "data/sample_document.json") -> tuple[Document, ReviewR
     else:
         doc = stubs.parse_document(file_path)
 
-    findings: list[ClauseFinding] = []
-
-    for clause in doc.clauses:
-        # Stage 2 — LegalBERT classification.
-        cls = stubs.classify_clause(clause)
-
-        # Stage 3 — GraphRAG retrieval using original clause + predicted type.
-        retr = stubs.retrieve(clause.text_en, cls.predicted_type)
-
-        # Stage 4 — evidence-first qualitative risk analysis.
-        partial = stubs.analyze_clause(clause, cls, retr)
-
-        # Stage 5 — uncertainty/review action.
-        decision = stubs.uncertainty_agent({
-            "clause_id": clause.clause_id,
-            "confidence": cls.confidence,
-            "relevance": partial["best_relevance"],
-            "risk_assessment": partial["risk_assessment"],
-        })
-
-        findings.append(
-            ClauseFinding(
-                **partial,
-                review_decision=decision.action,
-                review_reason=decision.reason,
-            )
-        )
+    # Stages 2-5 — Supervisor Agent: classification, retrieval, risk analysis,
+    # conditional adversarial review, and uncertainty verification, routed
+    # per clause instead of a fixed sequence.
+    findings: list[ClauseFinding] = [supervisor.run_clause(clause) for clause in doc.clauses]
 
     # Stage 6 — report.
     return doc, stubs.build_report(doc, findings)
 
 
+def run_with_versioning(
+    file_path: str = "data/sample_document.json",
+    db_path: str = storage.DB_PATH,
+) -> tuple[Document, ReviewReport, VersionAnalysisResult | None]:
+    """Same as run(), plus: Database Storage + Version Workflow. If the
+    parsed document is a confident content-based match for a previously
+    stored analysis, diff the clauses, compare risk, and recommend the
+    safer version. Every analysis (matched or not) is then persisted so
+    future uploads can be compared against it.
+
+    `db_path` is injectable (mirrors uncertainty_bandit.py's `weights_file`
+    parameter) so tests can point storage at a throwaway file instead of the
+    real database."""
+    doc, report = run(file_path)
+
+    match = storage.find_best_matching_document(doc, db_path=db_path)
+    version: VersionAnalysisResult | None = None
+    if match is not None:
+        matched_doc_id, match_score = match
+        prior = storage.load_analysis(matched_doc_id, db_path=db_path)
+        if prior is not None:
+            old_doc, old_report = prior
+            diff = version_diff.diff_documents(old_doc, doc)
+            comparison = risk_comparison.compare_versions(diff, old_report, report)
+            recommendation = version_recommendation.recommend_version(comparison)
+            version = VersionAnalysisResult(
+                matched_doc_id=matched_doc_id, match_score=match_score,
+                diff=diff, comparison=comparison, recommendation=recommendation,
+            )
+
+    # Match against existing rows BEFORE saving, so the new document can
+    # never match itself.
+    storage.save_analysis(doc, report, db_path=db_path)
+
+    return doc, report, version
+
+
 if __name__ == "__main__":
+    # Windows consoles default stdout to cp1252, which can't encode
+    # characters that show up in real LLM-generated text (e.g. U+2011
+    # non-breaking hyphen) or clause text from real contracts — force UTF-8
+    # so the CLI doesn't crash on otherwise-successful runs.
+    sys.stdout.reconfigure(encoding="utf-8")
+
     path = sys.argv[1] if len(sys.argv) > 1 else "data/sample_document.json"
     _doc, report = run(path)
     print(report.model_dump_json(indent=2))

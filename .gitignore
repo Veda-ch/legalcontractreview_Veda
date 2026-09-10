@@ -5,6 +5,10 @@ data/uploads/
 data/knowledge_base/
 legalbert_finetuned/
 training_output/
+data/bandit_weights.json
+data/contract_review.db
+data/contract_review.db-wal
+data/contract_review.db-shm
 *.zip
 # Temporary/generated files
 *.tmp

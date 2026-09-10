@@ -6,7 +6,8 @@ import os
 
 import streamlit as st
 
-from pipeline import run
+from pipeline import run_with_versioning
+import storage
 
 UPLOAD_DIR = "data/uploads"
 
@@ -47,6 +48,18 @@ with st.sidebar:
     st.divider()
     st.caption("No numerical 0–100 risk score is assigned.")
 
+    st.divider()
+    st.header("📚 Analysis History")
+    past_analyses = storage.list_analyses()
+    if past_analyses:
+        st.caption(f"{len(past_analyses)} contract(s) previously analyzed and stored.")
+        for row in past_analyses[:10]:
+            status = row["overall_assessment"].replace("_", " ").title() if row["overall_assessment"] else "—"
+            st.markdown(f"**{row['filename']}**  \n<span class='small'>{row['clause_count']} clauses · {status}</span>", unsafe_allow_html=True)
+    else:
+        st.caption("No contracts analyzed yet.")
+    st.caption("A new upload is automatically compared against stored contracts by content similarity — no manual matching needed.")
+
 uploaded = st.file_uploader(
     "Upload Contract",
     type=["pdf", "docx"],
@@ -64,7 +77,7 @@ with open(save_path, "wb") as f:
 
 try:
     with st.spinner("Parsing, classifying, retrieving evidence and analyzing clauses..."):
-        doc, report = run(save_path)
+        doc, report, version = run_with_versioning(save_path)
 except Exception as e:
     st.error(str(e))
     st.stop()
@@ -82,6 +95,64 @@ c4.metric("Review Status", report.overall_assessment.replace("_", " ").title())
 st.info(report.summary)
 
 st.divider()
+
+# ============================================================
+# VERSION COMPARISON — only rendered when this upload was auto-matched
+# to a previously stored analysis by content similarity.
+# ============================================================
+if version is not None:
+    st.header("🔄 Version Comparison")
+    st.caption(
+        f"This contract was automatically matched to a previously analyzed document "
+        f"(content similarity: {version.match_score:.0%}) and compared against it."
+    )
+
+    diff = version.diff
+    comparison = version.comparison
+    recommendation = version.recommendation
+
+    d1, d2, d3, d4 = st.columns(4)
+    added = sum(e.change_type == "added" for e in diff.entries)
+    removed = sum(e.change_type == "removed" for e in diff.entries)
+    modified = sum(e.change_type == "modified" for e in diff.entries)
+    unchanged = sum(e.change_type == "unchanged" for e in diff.entries)
+    d1.metric("Added", added)
+    d2.metric("Removed", removed)
+    d3.metric("Modified", modified)
+    d4.metric("Unchanged", unchanged)
+
+    r1, r2, r3 = st.columns(3)
+    r1.metric("Increased Risk", comparison.increased_count)
+    r2.metric("Reduced Risk", comparison.reduced_count)
+    r3.metric("Unchanged Risk", comparison.unchanged_count)
+
+    verdict_label = {"old": "Previous version recommended", "new": "New version recommended", "equivalent": "Versions roughly equivalent"}
+    if recommendation.safer_version == "new":
+        st.success(f"**{verdict_label[recommendation.safer_version]}** — {recommendation.reasoning}")
+    elif recommendation.safer_version == "old":
+        st.warning(f"**{verdict_label[recommendation.safer_version]}** — {recommendation.reasoning}")
+    else:
+        st.info(f"**{verdict_label[recommendation.safer_version]}** — {recommendation.reasoning}")
+    st.caption(
+        "This compares whether risk language changed, not whether removing a clause was itself favorable "
+        f"or unfavorable — see the clause-level detail below. (Reasoning source: {recommendation.reasoning_source})"
+    )
+
+    with st.expander("Clause-level changes"):
+        for entry in diff.entries:
+            icon = {"added": "➕", "removed": "➖", "modified": "✏️", "unchanged": "="}[entry.change_type]
+            heading = entry.new_heading or entry.old_heading or "(untitled clause)"
+            with st.container(border=True):
+                st.write(f"{icon} **{entry.change_type.title()}** — {heading}")
+                if entry.change_type == "modified":
+                    st.caption(f"Old: {entry.old_text_snippet}")
+                    st.caption(f"New: {entry.new_text_snippet}")
+                elif entry.change_type == "added":
+                    st.caption(f"New: {entry.new_text_snippet}")
+                elif entry.change_type == "removed":
+                    st.caption(f"Old: {entry.old_text_snippet}")
+
+    st.divider()
 
 # ============================================================
 # CLAUSE ANALYSIS

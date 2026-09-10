@@ -4,3 +4,8 @@ pdfplumber
 python-docx
 langdetect
 requests
+langgraph>=1.2,<2
+torch
+transformers
+faiss-cpu
+networkx
