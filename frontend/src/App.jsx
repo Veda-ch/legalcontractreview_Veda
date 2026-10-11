@@ -23,6 +23,55 @@ function statusOf(finding) {
   return "ok";
 }
 const STATUS_LABEL = { risk: "Attention required", unknown: "Insufficient evidence", ok: "No risk factor found" };
+const STATUS_HELP = {
+  risk: "The risk check found a specific concern, quoted from the clause text.",
+  unknown: "The risk check could not reach a reliable conclusion (for example, the AI model was unavailable).",
+  ok: "No configured risk was found for this clause type. This is not a guarantee that the clause is risk-free.",
+};
+
+// Same thresholds the uncertainty agent uses (uncertainty_bandit.py).
+const CONF_THRESHOLD = 0.6;
+const REL_THRESHOLD = 0.8;
+
+const DECISION_INFO = {
+  accept: { label: "Accept", tone: "ok", text: "Looks fine: enough confidence and evidence, and no unresolved risk." },
+  flag: { label: "Flag for legal review", tone: "risk", text: "A specific risk was found. A lawyer should review this clause." },
+  reanalyze: {
+    label: "Re-analyse",
+    tone: "unknown",
+    text: "The system is not sure enough to decide. It re-checks the clause and asks for a human look.",
+  },
+};
+
+// The uncertainty agent's starting rules, checked in this order; the first one that applies decides.
+function decisionRules(f) {
+  return [
+    {
+      test: `Is the clause type certain? (confidence ≥ ${pct(CONF_THRESHOLD, 0)})`,
+      ok: f.confidence >= CONF_THRESHOLD,
+      result: "reanalyze",
+      fail: `No: ${pct(f.confidence)} is below ${pct(CONF_THRESHOLD, 0)}, so the type may be wrong.`,
+    },
+    {
+      test: `Is there strong supporting evidence? (relevance ≥ ${pct(REL_THRESHOLD, 0)})`,
+      ok: f.best_relevance >= REL_THRESHOLD,
+      result: "reanalyze",
+      fail: `No: ${pct(f.best_relevance)} is below ${pct(REL_THRESHOLD, 0)}, so the evidence is weak.`,
+    },
+    {
+      test: "Did the risk check find a specific concern?",
+      ok: f.risk_assessment !== "attention_required",
+      result: "flag",
+      fail: "Yes: a concern was found in the clause text.",
+    },
+    {
+      test: "Could the risk check reach a conclusion?",
+      ok: f.risk_assessment !== "insufficient_evidence",
+      result: "reanalyze",
+      fail: "No: the evidence was insufficient for a reliable assessment.",
+    },
+  ];
+}
 
 function Badge({ tone, children }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
@@ -70,7 +119,8 @@ function HistoryDrawer({ open, onClose, history }) {
           </button>
         </div>
         <p className="muted small">
-          New uploads are automatically compared against stored contracts by content similarity.
+          Every analysis is saved here. To compare a new upload with one of these, choose it under "Compare with a
+          previous version" before uploading.
         </p>
         {history.length === 0 && <div className="empty">No contracts analyzed yet.</div>}
         {history.slice(0, 20).map((row) => (
@@ -228,6 +278,81 @@ function Section({ title, children, aside }) {
   );
 }
 
+// A score with its meaning, a threshold marker on the bar, and whether it passes.
+function Metric({ label, value, threshold, help, goodText, lowText }) {
+  const good = value >= threshold;
+  return (
+    <div className="kv">
+      <span>{label}</span>
+      <b>{pct(value)}</b>
+      <div className="bar-wrap">
+        <div className="bar">
+          <i style={{ width: pct(value) }} />
+        </div>
+        <div className="bar-mark" style={{ left: pct(threshold) }} title={`Threshold ${pct(threshold, 0)}`} />
+      </div>
+      <div className={`metric-status ${good ? "good" : "low"}`}>
+        {good ? "✓ " + goodText : "! " + lowText} <span className="muted">(threshold {pct(threshold, 0)})</span>
+      </div>
+      <div className="muted small">{help}</div>
+    </div>
+  );
+}
+
+// Explains the review decision by walking the uncertainty agent's rules in order.
+function WhyDecision({ finding }) {
+  const rules = decisionRules(finding);
+  const firedIndex = rules.findIndex((r) => !r.ok);
+  const ruleDecision = firedIndex === -1 ? "accept" : rules[firedIndex].result;
+  const exploratory = /exploratory/i.test(finding.review_reason || "");
+  const reanalysed = finding.evidence?.agent_route?.reanalysis;
+  const info = DECISION_INFO[finding.review_decision] || { label: finding.review_decision, tone: "neutral", text: "" };
+
+  return (
+    <Note tone={info.tone}>
+      <div className="why-head">
+        <b>Why "{info.label}"?</b>
+        <span className="muted small">RL uncertainty agent · checks run in this order, the first that fails decides</span>
+      </div>
+      <ol className="why-list">
+        {rules.map((r, i) => {
+          const state = i < firedIndex || firedIndex === -1 ? "pass" : i === firedIndex ? "fired" : "skipped";
+          return (
+            <li key={i} className={`why-row why-${state}`}>
+              <span className="why-icon">{state === "pass" ? "✓" : state === "fired" ? "→" : "·"}</span>
+              <span>
+                {r.test}{" "}
+                <span className="muted">
+                  {state === "pass" && "Yes."}
+                  {state === "fired" && `${r.fail} Decision: ${DECISION_INFO[r.result].label}.`}
+                  {state === "skipped" && "Not needed: an earlier check already decided."}
+                </span>
+              </span>
+            </li>
+          );
+        })}
+        {firedIndex === -1 && (
+          <li className="why-row why-fired">
+            <span className="why-icon">→</span>
+            <span>All checks passed. Decision: Accept.</span>
+          </li>
+        )}
+      </ol>
+      <div className="small">{info.text}</div>
+      {reanalysed && finding.review_decision === "reanalyze" && (
+        <div className="small muted">Automated re-analysis has already run once (see Agent route), so this clause now needs a human look.</div>
+      )}
+      {finding.review_decision !== ruleDecision && (
+        <div className="small" style={{ marginTop: 6 }}>
+          {exploratory
+            ? `Note: the RL agent explored an alternative this time (it tries a different, never less cautious, action 10% of the time to keep learning). By the rules above it would have chosen ${DECISION_INFO[ruleDecision].label}.`
+            : `Note: the RL agent's learned policy chose this instead of ${DECISION_INFO[ruleDecision].label}, based on reviewer feedback.`}
+        </div>
+      )}
+    </Note>
+  );
+}
+
 // Which agentic branches the Supervisor actually ran for this clause.
 function AgentRoute({ finding }) {
   const route = finding.evidence?.agent_route;
@@ -242,6 +367,7 @@ function AgentRoute({ finding }) {
           <span>Retrieval retry</span>
           <b>{route.broadened_retrieval_retry ? `Ran (${route.retrieval_attempts} searches)` : "Not needed"}</b>
           <div className="muted small">Final relevance {pct(finding.best_relevance)}</div>
+          <div className="muted small when">Runs when the first search finds weak evidence (below {pct(REL_THRESHOLD, 0)}): searches the whole knowledge base more broadly.</div>
         </div>
         <div className="kv">
           <span>Re-analysis</span>
@@ -251,11 +377,13 @@ function AgentRoute({ finding }) {
               Checked "{re.category_checked}" (score {pct(re.category_checked_score)})
             </div>
           )}
+          <div className="muted small when">Runs when the RL agent decides "re-analyse": re-checks the risk as if the clause were its second most likely type, keeping the more cautious result.</div>
         </div>
         <div className="kv">
           <span>Adversarial review</span>
           <b>{route.adversarial_review ? (adv?.still_concerning ? "Ran · concern upheld" : "Ran · concern disputed") : "Not triggered"}</b>
-          {adv?.source && <div className="muted small">Source: {adv.source}</div>}
+          {adv?.source && <div className="muted small">Source: {adv.source === "llm" ? "AI reviewer" : "fallback (AI unavailable, flag kept)"}</div>}
+          <div className="muted small when">Runs when a risk is found: a second AI pass tries to challenge the finding using only the same evidence.</div>
         </div>
       </div>
 
@@ -295,34 +423,48 @@ function ClauseDetail({ clause, finding }) {
           <div className="muted small">Clause {clause.index + 1}</div>
           <h2>{clause.heading || `Clause ${clause.index + 1}`}</h2>
         </div>
-        <Badge tone={status}>{STATUS_LABEL[status]}</Badge>
+        <div className="status-block">
+          <Badge tone={status}>{STATUS_LABEL[status]}</Badge>
+          <div className="muted small">{STATUS_HELP[status]}</div>
+        </div>
       </div>
 
       <div className="kv-row">
         <div className="kv">
-          <span>Type</span>
+          <span>Clause type</span>
           <b>{finding.clause_type}</b>
+          <div className="muted small">One of 100 contract clause categories, predicted by the LegalBERT model.</div>
         </div>
-        <div className="kv">
-          <span>Confidence</span>
-          <b>{pct(finding.confidence)}</b>
-          <div className="bar">
-            <i style={{ width: pct(finding.confidence) }} />
-          </div>
-        </div>
-        <div className="kv">
-          <span>Retrieval relevance</span>
-          <b>{pct(finding.best_relevance)}</b>
-          <div className="bar">
-            <i style={{ width: pct(finding.best_relevance) }} />
-          </div>
-        </div>
+        <Metric
+          label="Confidence"
+          value={finding.confidence}
+          threshold={CONF_THRESHOLD}
+          goodText="Type is certain"
+          lowText="Type is uncertain"
+          help="How sure the model is that the clause type is correct."
+        />
+        <Metric
+          label="Retrieval relevance"
+          value={finding.best_relevance}
+          threshold={REL_THRESHOLD}
+          goodText="Strong evidence"
+          lowText="Weak evidence"
+          help="How closely the clause matches real contract clauses in the legal knowledge base (the evidence)."
+        />
         <div className="kv">
           <span>Review decision</span>
-          <b className="mono">{finding.review_decision}</b>
+          <b>{(DECISION_INFO[finding.review_decision] || {}).label || finding.review_decision}</b>
+          <div className="muted small">{(DECISION_INFO[finding.review_decision] || {}).text}</div>
         </div>
       </div>
-      {finding.review_reason && <p className="muted small">{finding.review_reason}</p>}
+
+      <WhyDecision finding={finding} />
+      {finding.review_reason && (
+        <details className="raw-reason">
+          <summary className="muted small">Agent's own message</summary>
+          <p className="muted small">{finding.review_reason}</p>
+        </details>
+      )}
 
       <AgentRoute finding={finding} />
 
@@ -584,6 +726,35 @@ function Results({ document: doc, report, version }) {
           <Stat label="Insufficient evidence" value={n("unknown")} tone="unknown" />
           <Stat label="No risk factor found" value={n("ok")} tone="ok" />
         </div>
+        <details className="how-to-read">
+          <summary>How to read these results</summary>
+          <div className="how-grid">
+            <div>
+              <b>Risk assessment</b> (the coloured label on each clause)
+              <ul>
+                <li><b>Attention required:</b> {STATUS_HELP.risk}</li>
+                <li><b>Insufficient evidence:</b> {STATUS_HELP.unknown}</li>
+                <li><b>No risk factor found:</b> {STATUS_HELP.ok}</li>
+              </ul>
+            </div>
+            <div>
+              <b>Scores</b>
+              <ul>
+                <li><b>Confidence:</b> how sure the LegalBERT model is about the clause type. Below {pct(CONF_THRESHOLD, 0)} the type may be wrong.</li>
+                <li><b>Retrieval relevance:</b> how closely the clause matches real clauses in the legal knowledge base. Below {pct(REL_THRESHOLD, 0)} the evidence is weak.</li>
+              </ul>
+            </div>
+            <div>
+              <b>Review decision</b> (made by the RL uncertainty agent)
+              <ul>
+                <li><b>Accept:</b> {DECISION_INFO.accept.text}</li>
+                <li><b>Flag:</b> {DECISION_INFO.flag.text}</li>
+                <li><b>Re-analyse:</b> {DECISION_INFO.reanalyze.text}</li>
+              </ul>
+              Each clause shows the exact checks behind its decision under "Why …?".
+            </div>
+          </div>
+        </details>
       </div>
 
       <nav className="tabs">

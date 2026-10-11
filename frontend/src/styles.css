@@ -295,3 +295,28 @@ pre.json {
   .detail { padding: 1.1rem; }
   .step { width: 64px; }
 }
+
+/* ---------- self-explanatory scores & decisions ---------- */
+.bar-wrap { position: relative; margin-top: .25rem; }
+.bar-wrap .bar { margin-top: 0; }
+.bar-mark { position: absolute; top: -3px; width: 2px; height: 11px; background: var(--text); opacity: .55; border-radius: 1px; }
+.metric-status { font-size: .78rem; font-weight: 600; margin-top: .2rem; }
+.metric-status.good { color: var(--ok); }
+.metric-status.low { color: var(--unknown); }
+.status-block { display: flex; flex-direction: column; align-items: flex-end; gap: .3rem; max-width: 320px; text-align: right; }
+.why-head { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; align-items: baseline; margin-bottom: .4rem; }
+.why-list { list-style: none; padding: 0; margin: .2rem 0 .5rem; display: flex; flex-direction: column; gap: .3rem; }
+.why-row { display: flex; gap: .55rem; font-size: .88rem; align-items: baseline; }
+.why-icon { width: 1rem; text-align: center; font-weight: 800; flex-shrink: 0; }
+.why-pass .why-icon { color: var(--ok); }
+.why-fired { font-weight: 600; }
+.why-fired .why-icon { color: var(--primary); }
+.why-skipped { opacity: .5; }
+.raw-reason { margin-top: .5rem; }
+.raw-reason summary { cursor: pointer; }
+.kv .when { margin-top: .35rem; font-style: italic; }
+.how-to-read { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: .8rem; }
+.how-to-read summary { cursor: pointer; font-weight: 600; color: var(--primary); }
+.how-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-top: .8rem; font-size: .88rem; }
+.how-grid ul { margin: .35rem 0 .35rem 1.1rem; padding: 0; display: flex; flex-direction: column; gap: .25rem; color: var(--muted); }
+.kv .metric-status span { text-transform: none; letter-spacing: 0; font-size: inherit; font-weight: 400; }
